@@ -1325,6 +1325,16 @@ function normalizarNumero(phone) {
 
 async function startBot() {
   console.log("1. Iniciando bot");
+  console.log("Rodando reconcile do dw-receitech antes de iniciar a fila...");
+
+  try {
+    await rodarReconcile();
+    console.log("Reconcile inicial concluido.");
+  } catch (erro) {
+    console.log("Erro no reconcile inicial:", erro.message);
+    console.log("Bot nao sera iniciado para evitar envio com fila desatualizada.");
+    process.exit(1);
+  }
 
   const dw = await criarConexaoDW();
   const feedbackDb = await criarConexaoFeedback();
