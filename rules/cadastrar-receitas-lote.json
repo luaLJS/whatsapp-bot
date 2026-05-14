@@ -1,0 +1,11 @@
+{
+  "id": "cadastrar_receitas_lote",
+  "priority": 50,
+  "matchGroups": [
+    ["cadastrar", "cadastro", "incluir", "adicionar", "importar", "mandar", "enviar"],
+    ["receita", "receitas", "ficha tecnica", "fichas tecnicas"],
+    ["varias", "muitas", "lote", "uma vez", "varios", "arquivo", "arquivos", "pdf", "foto", "fotos", "planilha"]
+  ],
+  "minimumScore": 3,
+  "text": "Claro, vamos lá!\nPode me enviar as fotos, PDFs ou arquivos com as receitas que você quer cadastrar, por favor?\n\nA gente vai processar tudo por aqui e eu já te dou um retorno 🙌🏽\n\nSe quiser, pode mandar as receitas aos poucos também, sem problema 🙂"
+}

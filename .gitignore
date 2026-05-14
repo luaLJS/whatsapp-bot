@@ -1,0 +1,26 @@
+.env
+*.env
+OLD.env.txt
+Supabase teste keys.txt
+
+auth/
+auth.old/
+node_modules/
+
+*.duckdb
+*.duckdb.wal
+*.db
+*.sqlite
+*.sqlite3
+
+data/
+logs/
+*.log
+
+*.backup*
+*.bak
+*.tmp
+
+OLD*
+Sobre o bot.txt
+OLD guia_bot_whatsapp_baileys_receitech.docx

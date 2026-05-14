@@ -1,0 +1,29 @@
+{
+  "id": "opt_out",
+  "priority": 10,
+  "confirmationPrompt": "Entendi. Você quer parar de receber mensagens da Receitech por aqui?\n\nResponda SIM para confirmar ou NÃO para continuar recebendo.",
+  "confirmationText": "Pronto, você não receberá mais mensagens nossas por aqui.",
+  "cancellationText": "Perfeito, você continuará recebendo nossas mensagens por aqui.",
+  "confirmationWords": ["sim", "s", "confirmo", "confirmar", "quero", "pode parar"],
+  "cancellationWords": ["nao", "n", "não", "continuar", "cancela", "cancelar"],
+  "intentPatterns": [
+    {
+      "allGroups": [
+        ["nao quero", "nao desejo", "parem", "para de", "pare de"],
+        ["receber", "mandar", "mensagem", "mensagens", "enviar"]
+      ]
+    },
+    {
+      "allGroups": [
+        ["remover", "remove", "tirar", "tira", "excluir", "descadastrar"],
+        ["lista", "contato", "cadastro", "mensagem", "mensagens"]
+      ]
+    },
+    {
+      "allGroups": [
+        ["cancelar", "sair", "parar"],
+        ["mensagem", "mensagens", "lista", "recebimento", "campanha"]
+      ]
+    }
+  ]
+}
