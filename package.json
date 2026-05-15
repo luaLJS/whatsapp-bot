@@ -12,7 +12,7 @@
   "type": "commonjs",
   "dependencies": {
     "@supabase/supabase-js": "^2.99.1",
-    "@whiskeysockets/baileys": "^6.7.21",
+    "@whiskeysockets/baileys": "^7.0.0-rc11",
     "dotenv": "^17.3.1",
     "duckdb": "^1.4.4",
     "qrcode-terminal": "^0.12.0"
