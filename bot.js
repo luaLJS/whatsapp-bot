@@ -378,6 +378,34 @@ let workerStarted = false;
 let processandoRespostas = false;
 let envioExclusivo = Promise.resolve();
 let activeSock = null;
+let activeDw = null;
+let activeFeedbackDb = null;
+
+function definirConexoesAtivas(dw, feedbackDb) {
+  if (dw) {
+    activeDw = dw;
+  }
+
+  if (feedbackDb) {
+    activeFeedbackDb = feedbackDb;
+  }
+}
+
+async function obterDwAtual() {
+  while (!activeDw) {
+    await delay(250);
+  }
+
+  return activeDw;
+}
+
+async function obterFeedbackDbAtual() {
+  while (!activeFeedbackDb) {
+    await delay(250);
+  }
+
+  return activeFeedbackDb;
+}
 
 function carregarRegraJson(fileName) {
   const filePath = path.join(__dirname, "rules", fileName);
@@ -1347,12 +1375,14 @@ async function startBot() {
   const feedbackDb = await criarConexaoFeedback();
 
   await inicializarFeedbackDB(feedbackDb);
+  definirConexoesAtivas(dw, feedbackDb);
 
   await conectarWhatsApp(dw, feedbackDb);
 }
 
 async function conectarWhatsApp(dw, feedbackDb) {
   restartingConnection = false;
+  definirConexoesAtivas(dw, feedbackDb);
 
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
@@ -1370,9 +1400,11 @@ async function conectarWhatsApp(dw, feedbackDb) {
 
   sock.ev.on("messages.upsert", async ({ messages }) => {
     for (const msg of messages || []) {
-      lidarComMensagemRecebida(sock, feedbackDb, msg).catch((erro) => {
-        console.log("Erro ao processar mensagem recebida:", erro.message);
-      });
+      obterFeedbackDbAtual()
+        .then((db) => lidarComMensagemRecebida(sock, db, msg))
+        .catch((erro) => {
+          console.log("Erro ao processar mensagem recebida:", erro.message);
+        });
     }
   });
 
@@ -1423,14 +1455,14 @@ async function conectarWhatsApp(dw, feedbackDb) {
         console.log("Reiniciando conexao para finalizar autenticacao...");
       }
 
-      reiniciarConexao(sock, dw, feedbackDb);
+      reiniciarConexao(sock);
     }
   });
 }
 
 startBot();
 
-function reiniciarConexao(sock, dw, feedbackDb) {
+function reiniciarConexao(sock) {
   if (restartingConnection) return;
 
   restartingConnection = true;
@@ -1453,11 +1485,13 @@ function reiniciarConexao(sock, dw, feedbackDb) {
   }
 
   setTimeout(() => {
-    conectarWhatsApp(dw, feedbackDb).catch((erro) => {
-      restartingConnection = false;
-      console.log("Erro ao reiniciar conexao:", erro.message);
-      reiniciarConexao(sock, dw, feedbackDb);
-    });
+    Promise.all([obterDwAtual(), obterFeedbackDbAtual()])
+      .then(([dw, feedbackDb]) => conectarWhatsApp(dw, feedbackDb))
+      .catch((erro) => {
+        restartingConnection = false;
+        console.log("Erro ao reiniciar conexao:", erro.message);
+        reiniciarConexao(sock);
+      });
   }, RECONNECT_DELAY_MS);
 }
 
@@ -1656,29 +1690,47 @@ async function processarFila(sock, dw, feedbackDb) {
 async function iniciarWorker(sock, dw, feedbackDb) {
   console.log("Worker continuo iniciado.");
   let dwAtual = dw;
+  let feedbackDbAtual = feedbackDb;
+  definirConexoesAtivas(dwAtual, feedbackDbAtual);
 
   while (true) {
     try {
       const sockAtual = activeSock || sock;
-      await processarRespostasPendentes(sockAtual, feedbackDb);
+      await processarRespostasPendentes(sockAtual, feedbackDbAtual);
       console.log("Verificando fila...");
       const houveProcessamento = await processarFila(
         sockAtual,
         dwAtual,
-        feedbackDb,
+        feedbackDbAtual,
       );
 
       if (houveProcessamento) {
         try {
           await fecharConexao(dwAtual);
           dwAtual = null;
+          activeDw = null;
+          await fecharConexao(feedbackDbAtual);
+          feedbackDbAtual = null;
+          activeFeedbackDb = null;
+
           await rodarReconcile();
+
           dwAtual = await criarConexaoDW();
+          feedbackDbAtual = await criarConexaoFeedback();
+          await inicializarFeedbackDB(feedbackDbAtual);
+          definirConexoesAtivas(dwAtual, feedbackDbAtual);
         } catch (erro) {
           console.log("Aviso: reconcile falhou:", erro.message);
 
           if (!dwAtual) {
             dwAtual = await criarConexaoDW();
+            activeDw = dwAtual;
+          }
+
+          if (!feedbackDbAtual) {
+            feedbackDbAtual = await criarConexaoFeedback();
+            await inicializarFeedbackDB(feedbackDbAtual);
+            activeFeedbackDb = feedbackDbAtual;
           }
         }
       }
@@ -1687,6 +1739,13 @@ async function iniciarWorker(sock, dw, feedbackDb) {
 
       if (!dwAtual) {
         dwAtual = await criarConexaoDW();
+        activeDw = dwAtual;
+      }
+
+      if (!feedbackDbAtual) {
+        feedbackDbAtual = await criarConexaoFeedback();
+        await inicializarFeedbackDB(feedbackDbAtual);
+        activeFeedbackDb = feedbackDbAtual;
       }
     }
 
