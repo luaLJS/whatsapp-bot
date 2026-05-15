@@ -923,7 +923,14 @@ async function aplicarCooldownHorarioSeNecessario(perfil, timestamps) {
     console.log(
       `Limite horario da sessao atingido (${timestamps.length}/${perfil.hourlyLimitMessages} envios na ultima hora).`,
     );
-    await esperarSeAindaDentroDaJanela(cooldown, "Cooldown horario");
+    const continuar = await esperarSeAindaDentroDaJanela(
+      cooldown,
+      "Cooldown horario",
+    );
+
+    if (!continuar) {
+      return false;
+    }
   }
 }
 
@@ -1560,10 +1567,14 @@ async function processarFila(sock, dw, feedbackDb) {
         continue;
       }
 
-      await aplicarCooldownHorarioSeNecessario(
+      const podeContinuarAposCooldown = await aplicarCooldownHorarioSeNecessario(
         perfilCadencia,
         enviosUltimaHora,
       );
+
+      if (podeContinuarAposCooldown === false) {
+        return true;
+      }
 
       console.log(
         `Enviando mensagem ${msg.id} para ${numeroNormalizado} (${String(msg.message_text || "").length} caracteres)`,
