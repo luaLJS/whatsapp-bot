@@ -1644,21 +1644,39 @@ async function processarFila(sock, dw, feedbackDb) {
 
 async function iniciarWorker(sock, dw, feedbackDb) {
   console.log("Worker continuo iniciado.");
+  let dwAtual = dw;
 
   while (true) {
     try {
       const sockAtual = activeSock || sock;
       await processarRespostasPendentes(sockAtual, feedbackDb);
       console.log("Verificando fila...");
-      const houveProcessamento = await processarFila(sockAtual, dw, feedbackDb);
+      const houveProcessamento = await processarFila(
+        sockAtual,
+        dwAtual,
+        feedbackDb,
+      );
 
       if (houveProcessamento) {
-        await rodarReconcile().catch((erro) => {
+        try {
+          await fecharConexao(dwAtual);
+          dwAtual = null;
+          await rodarReconcile();
+          dwAtual = await criarConexaoDW();
+        } catch (erro) {
           console.log("Aviso: reconcile falhou:", erro.message);
-        });
+
+          if (!dwAtual) {
+            dwAtual = await criarConexaoDW();
+          }
+        }
       }
     } catch (erro) {
       console.log("Erro no worker continuo:", erro.message);
+
+      if (!dwAtual) {
+        dwAtual = await criarConexaoDW();
+      }
     }
 
     await delay(60 * 1000);
