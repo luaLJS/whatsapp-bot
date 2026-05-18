@@ -502,6 +502,10 @@ function criarConexaoDW() {
 }
 
 function fecharConexao(db) {
+  if (!db) {
+    return Promise.resolve();
+  }
+
   return new Promise((resolve, reject) => {
     db.close((err) => {
       if (err) reject(err);
@@ -902,6 +906,57 @@ function rodarReconcile() {
       else resolve();
     });
   });
+}
+
+async function tentarComRetry(nome, operacao, tentativas = 5, esperaMs = 2000) {
+  let ultimoErro;
+
+  for (let tentativa = 1; tentativa <= tentativas; tentativa += 1) {
+    try {
+      return await operacao();
+    } catch (erro) {
+      ultimoErro = erro;
+
+      if (tentativa >= tentativas) {
+        break;
+      }
+
+      console.log(
+        `${nome} falhou na tentativa ${tentativa}/${tentativas}; tentando novamente em ${formatDuration(esperaMs)}`,
+      );
+      await delay(esperaMs);
+    }
+  }
+
+  throw ultimoErro;
+}
+
+function rodarReconcileComRetry() {
+  return tentarComRetry("Reconcile", rodarReconcile, 5, 3000);
+}
+
+async function fecharConexoesParaReconcile(dw, feedbackDb) {
+  activeDw = null;
+  activeFeedbackDb = null;
+
+  await delay(500);
+  await Promise.all([fecharConexao(dw), fecharConexao(feedbackDb)]);
+  await delay(1000);
+}
+
+async function reabrirConexoesAposReconcile() {
+  const dw = await tentarComRetry("Reabrir DW", criarConexaoDW, 5, 2000);
+  const feedbackDb = await tentarComRetry(
+    "Reabrir feedback",
+    criarConexaoFeedback,
+    5,
+    2000,
+  );
+
+  await inicializarFeedbackDB(feedbackDb);
+  definirConexoesAtivas(dw, feedbackDb);
+
+  return { dw, feedbackDb };
 }
 
 
@@ -1364,7 +1419,7 @@ async function startBot() {
   console.log("Rodando reconcile do dw-receitech antes de iniciar a fila...");
 
   try {
-    await rodarReconcile();
+    await rodarReconcileComRetry();
     console.log("Reconcile inicial concluido.");
   } catch (erro) {
     console.log("Erro no reconcile inicial:", erro.message);
@@ -1707,46 +1762,39 @@ async function iniciarWorker(sock, dw, feedbackDb) {
 
       if (houveProcessamento) {
         try {
-          await fecharConexao(dwAtual);
+          await fecharConexoesParaReconcile(dwAtual, feedbackDbAtual);
           dwAtual = null;
-          activeDw = null;
-          await fecharConexao(feedbackDbAtual);
           feedbackDbAtual = null;
-          activeFeedbackDb = null;
 
-          await rodarReconcile();
+          await rodarReconcileComRetry();
 
-          dwAtual = await criarConexaoDW();
-          feedbackDbAtual = await criarConexaoFeedback();
-          await inicializarFeedbackDB(feedbackDbAtual);
-          definirConexoesAtivas(dwAtual, feedbackDbAtual);
+          const conexoes = await reabrirConexoesAposReconcile();
+          dwAtual = conexoes.dw;
+          feedbackDbAtual = conexoes.feedbackDb;
         } catch (erro) {
           console.log("Aviso: reconcile falhou:", erro.message);
 
-          if (!dwAtual) {
-            dwAtual = await criarConexaoDW();
-            activeDw = dwAtual;
-          }
-
-          if (!feedbackDbAtual) {
-            feedbackDbAtual = await criarConexaoFeedback();
-            await inicializarFeedbackDB(feedbackDbAtual);
-            activeFeedbackDb = feedbackDbAtual;
+          if (!dwAtual || !feedbackDbAtual) {
+            const conexoes = await reabrirConexoesAposReconcile();
+            dwAtual = conexoes.dw;
+            feedbackDbAtual = conexoes.feedbackDb;
           }
         }
       }
     } catch (erro) {
       console.log("Erro no worker continuo:", erro.message);
 
-      if (!dwAtual) {
-        dwAtual = await criarConexaoDW();
-        activeDw = dwAtual;
-      }
-
-      if (!feedbackDbAtual) {
-        feedbackDbAtual = await criarConexaoFeedback();
-        await inicializarFeedbackDB(feedbackDbAtual);
-        activeFeedbackDb = feedbackDbAtual;
+      try {
+        if (!dwAtual || !feedbackDbAtual) {
+          const conexoes = await reabrirConexoesAposReconcile();
+          dwAtual = conexoes.dw;
+          feedbackDbAtual = conexoes.feedbackDb;
+        }
+      } catch (erroReabrir) {
+        console.log(
+          "Aviso: nao foi possivel reabrir conexoes do DuckDB:",
+          erroReabrir.message,
+        );
       }
     }
 
