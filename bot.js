@@ -242,6 +242,7 @@ let ocultarStreamBaileysAte = 0;
 
 const LOGS_BAILEYS_SENSIVEIS = [
   "Failed to decrypt message",
+  "Decrypted message with closed session",
   "Session error",
   "Bad MAC",
   "Closing session",
