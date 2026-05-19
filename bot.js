@@ -671,6 +671,21 @@ function registrarResultado(db, messageId, status, erro = null) {
   });
 }
 
+async function buscarResultadoRegistrado(db, messageId) {
+  const rows = await consultarSql(
+    db,
+    `
+      SELECT status, sent_at, error_msg
+      FROM message_results
+      WHERE message_id = ?
+      LIMIT 1
+    `,
+    messageId,
+  );
+
+  return rows?.[0] || null;
+}
+
 function formatarTimestampLocal(date) {
   const pad = (value) => String(value).padStart(2, "0");
 
@@ -1573,6 +1588,18 @@ async function processarFila(sock, dw, feedbackDb) {
     index++;
     console.log(`[${index}/${mensagens.length}] Preparando envio`);
     try {
+      const resultadoRegistrado = await buscarResultadoRegistrado(
+        feedbackDb,
+        msg.id,
+      );
+
+      if (resultadoRegistrado) {
+        console.log(
+          `Mensagem ${msg.id} ja registrada no bot_feedback como ${resultadoRegistrado.status}; pulando para evitar duplicidade.`,
+        );
+        continue;
+      }
+
       await processarRespostasPendentes(sock, feedbackDb);
 
       if (!dentroDaJanelaDeEnvio()) {
@@ -1747,7 +1774,11 @@ async function iniciarWorker(sock, dw, feedbackDb) {
         try {
           await reconciliarFeedbackNoDw(dwAtual, feedbackDbAtual);
         } catch (erro) {
-          console.log("Aviso: reconcile falhou:", erro.message);
+          console.log("Erro: reconcile falhou apos processamento:", erro.message);
+          console.log(
+            "Bot sera encerrado para evitar reprocessar a fila e reenviar mensagens ja registradas no feedback.",
+          );
+          process.exit(1);
         }
       }
     } catch (erro) {
