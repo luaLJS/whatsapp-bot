@@ -1,5 +1,3 @@
-const { exec } = require("child_process");
-
 const contadorSessao = {};
 
 const CADENCE_CONFIG = {
@@ -897,66 +895,49 @@ async function registrarFalhaResposta(db, id, erro, attempts) {
 }
 
 
-function rodarReconcile() {
-  return new Promise((resolve, reject) => {
-    exec(
-  'cd /d "C:\\Users\\ljsen\\DEV RECEITECH\\dw-receitech" && .venv\\Scripts\\python.exe -m pipeline reconcile',
-  (error) => {
-      if (error) reject(error);
-      else resolve();
-    });
-  });
-}
-
-async function tentarComRetry(nome, operacao, tentativas = 5, esperaMs = 2000) {
-  let ultimoErro;
-
-  for (let tentativa = 1; tentativa <= tentativas; tentativa += 1) {
-    try {
-      return await operacao();
-    } catch (erro) {
-      ultimoErro = erro;
-
-      if (tentativa >= tentativas) {
-        break;
-      }
-
-      console.log(
-        `${nome} falhou na tentativa ${tentativa}/${tentativas}; tentando novamente em ${formatDuration(esperaMs)}`,
-      );
-      await delay(esperaMs);
-    }
-  }
-
-  throw ultimoErro;
-}
-
-function rodarReconcileComRetry() {
-  return tentarComRetry("Reconcile", rodarReconcile, 5, 3000);
-}
-
-async function fecharConexoesParaReconcile(dw, feedbackDb) {
-  activeDw = null;
-  activeFeedbackDb = null;
-
-  await delay(500);
-  await Promise.all([fecharConexao(dw), fecharConexao(feedbackDb)]);
-  await delay(1000);
-}
-
-async function reabrirConexoesAposReconcile() {
-  const dw = await tentarComRetry("Reabrir DW", criarConexaoDW, 5, 2000);
-  const feedbackDb = await tentarComRetry(
-    "Reabrir feedback",
-    criarConexaoFeedback,
-    5,
-    2000,
+async function reconciliarFeedbackNoDw(dw, feedbackDb) {
+  const resultados = await consultarSql(
+    feedbackDb,
+    `
+      SELECT message_id, status, sent_at, error_msg
+      FROM message_results
+    `,
   );
 
-  await inicializarFeedbackDB(feedbackDb);
-  definirConexoesAtivas(dw, feedbackDb);
+  if (!resultados.length) {
+    console.log("[reconcile] bot_feedback sem resultados para sincronizar.");
+    return;
+  }
 
-  return { dw, feedbackDb };
+  for (const resultado of resultados) {
+    await executarSql(
+      dw,
+      `
+        INSERT OR REPLACE INTO gold.whatsapp_message_log
+          (message_id, status, sent_at, error_msg)
+        VALUES (?, ?, ?, ?)
+      `,
+      resultado.message_id,
+      resultado.status,
+      resultado.sent_at,
+      resultado.error_msg,
+    );
+  }
+
+  await executarSql(
+    dw,
+    `
+      UPDATE gold.whatsapp_message_queue
+      SET status = log.status
+      FROM gold.whatsapp_message_log log
+      WHERE gold.whatsapp_message_queue.id = log.message_id
+        AND gold.whatsapp_message_queue.status = 'pending'
+    `,
+  );
+
+  console.log(
+    `[reconcile] sincronizacao interna concluida (${resultados.length} resultados).`,
+  );
 }
 
 
@@ -1416,22 +1397,24 @@ function normalizarNumero(phone) {
 
 async function startBot() {
   console.log("1. Iniciando bot");
-  console.log("Rodando reconcile do dw-receitech antes de iniciar a fila...");
-
-  try {
-    await rodarReconcileComRetry();
-    console.log("Reconcile inicial concluido.");
-  } catch (erro) {
-    console.log("Erro no reconcile inicial:", erro.message);
-    console.log("Bot nao sera iniciado para evitar envio com fila desatualizada.");
-    process.exit(1);
-  }
 
   const dw = await criarConexaoDW();
   const feedbackDb = await criarConexaoFeedback();
 
   await inicializarFeedbackDB(feedbackDb);
   definirConexoesAtivas(dw, feedbackDb);
+
+  console.log("Rodando reconcile interno antes de iniciar a fila...");
+
+  try {
+    await reconciliarFeedbackNoDw(dw, feedbackDb);
+    console.log("Reconcile inicial concluido.");
+  } catch (erro) {
+    console.log("Erro no reconcile inicial:", erro.message);
+    console.log("Bot nao sera iniciado para evitar envio com fila desatualizada.");
+    await Promise.all([fecharConexao(dw), fecharConexao(feedbackDb)]);
+    process.exit(1);
+  }
 
   await conectarWhatsApp(dw, feedbackDb);
 }
@@ -1762,40 +1745,13 @@ async function iniciarWorker(sock, dw, feedbackDb) {
 
       if (houveProcessamento) {
         try {
-          await fecharConexoesParaReconcile(dwAtual, feedbackDbAtual);
-          dwAtual = null;
-          feedbackDbAtual = null;
-
-          await rodarReconcileComRetry();
-
-          const conexoes = await reabrirConexoesAposReconcile();
-          dwAtual = conexoes.dw;
-          feedbackDbAtual = conexoes.feedbackDb;
+          await reconciliarFeedbackNoDw(dwAtual, feedbackDbAtual);
         } catch (erro) {
           console.log("Aviso: reconcile falhou:", erro.message);
-
-          if (!dwAtual || !feedbackDbAtual) {
-            const conexoes = await reabrirConexoesAposReconcile();
-            dwAtual = conexoes.dw;
-            feedbackDbAtual = conexoes.feedbackDb;
-          }
         }
       }
     } catch (erro) {
       console.log("Erro no worker continuo:", erro.message);
-
-      try {
-        if (!dwAtual || !feedbackDbAtual) {
-          const conexoes = await reabrirConexoesAposReconcile();
-          dwAtual = conexoes.dw;
-          feedbackDbAtual = conexoes.feedbackDb;
-        }
-      } catch (erroReabrir) {
-        console.log(
-          "Aviso: nao foi possivel reabrir conexoes do DuckDB:",
-          erroReabrir.message,
-        );
-      }
     }
 
     await delay(60 * 1000);
